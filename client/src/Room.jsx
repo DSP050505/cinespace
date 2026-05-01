@@ -154,8 +154,30 @@ function Room() {
     }
   };
 
+  const theaterRef = useRef(null);
+
+  // Handle True Fullscreen using Browser API
+  const toggleFullScreen = () => {
+    if (!document.fullscreenElement) {
+      theaterRef.current.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+      });
+      setIsFullScreen(true);
+    } else {
+      document.exitFullscreen();
+      setIsFullScreen(false);
+    }
+  };
+
+  // Keep state in sync if user presses ESC to exit fullscreen
+  useEffect(() => {
+    const handleFsChange = () => setIsFullScreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
   return (
-    <div style={{ position: 'relative', width: '100vw', height: '100vh', background: '#fff', overflow: 'hidden' }}>
+    <div ref={theaterRef} style={{ position: 'relative', width: '100vw', height: '100vh', background: '#fff', overflow: 'hidden' }}>
       
       {/* Share Button */}
       {!screenStream && !remoteScreenStream && (
@@ -170,17 +192,19 @@ function Room() {
       )}
 
       {/* Screen Sharing View */}
-      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isFullScreen ? '0' : '40px' }}>
-        <div style={{ 
-          width: isFullScreen ? '100%' : '85%', 
-          height: isFullScreen ? '100%' : '85%', 
-          background: '#000', 
-          borderRadius: isFullScreen ? '0' : '10px', 
-          overflow: 'hidden', 
-          boxShadow: isFullScreen ? 'none' : '0 10px 30px rgba(0,0,0,0.1)',
-          position: 'relative',
-          display: (screenStream || remoteScreenStream) ? 'block' : 'none'
-        }}>
+      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isFullScreen ? '0' : '40px', background: isFullScreen ? '#000' : '#fff' }}>
+        <div 
+          style={{ 
+            width: isFullScreen ? '100%' : '85%', 
+            height: isFullScreen ? '100%' : '85%', 
+            background: '#000', 
+            borderRadius: isFullScreen ? '0' : '10px', 
+            overflow: 'hidden', 
+            boxShadow: isFullScreen ? 'none' : '0 10px 30px rgba(0,0,0,0.1)',
+            position: 'relative',
+            display: (screenStream || remoteScreenStream) ? 'block' : 'none'
+          }}
+        >
           {screenStream && (
             <video ref={localScreenRef} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           )}
@@ -188,8 +212,8 @@ function Room() {
             <video ref={remoteScreenRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           )}
           <button 
-            onClick={() => setIsFullScreen(!isFullScreen)}
-            style={{ position: 'absolute', bottom: '20px', right: '20px', background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: '50%', padding: '10px', color: 'white', cursor: 'pointer' }}
+            onClick={toggleFullScreen}
+            style={{ position: 'absolute', bottom: '20px', right: '20px', background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '50%', padding: '10px', color: 'white', cursor: 'pointer', zIndex: 100 }}
           >
             {isFullScreen ? <Minimize size={20} /> : <Maximize size={20} />}
           </button>
