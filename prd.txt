@@ -1,0 +1,223 @@
+CineSync
+Watch movies together, in perfect sync — with video & voice
+WebRTC
+React + Node
+Socket.io
+v1.0 PRD
+PROBLEM & GOAL
+The core problem
+Two people want to watch a movie together remotely — with zero sync delay, both
+cameras on, and voice chat. Existing solutions (Teleparty, Kast) have lag, require
+browser extensions, or don't support direct file/stream URLs freely.
+Success criteria
+ Play/pause/seek events sync within <300ms between both users
+ 
+ No audio drift between users over a 2-hour session
+ 
+ WebRTC video+audio call quality ≥ 720p at 30fps
+ 
+ Works on Chrome/Firefox/Safari without any extensions
+ 
+ Room creation to watching in under 60 seconds
+ 
+TECH STACK (EXACT)
+Frontend
+React 18 + Vite
+Styling
+Tailwind CSS
+Video player
+Video.js or Plyr.js
+Sync layer
+Socket.io (WebSockets)
+AV call
+WebRTC + PeerJS
+Signaling server
+Node.js + Express
+Movie search
+TMDB API (free)
+Streaming source
+Direct URL / HLS
+Deployment
+Railway / Render
+STUN/TURN
+Metered.ca (free tier)
+SYNC ARCHITECTURE (CRITICAL — READ CAREFULLY)
+
+How zero-lag sync works
+The host is the source of truth. All sync events flow through a Socket.io room. The
+key insight: don't relay video data — just relay control events (play, pause, seek).
+Each user streams the same video URL from their own device, so bandwidth is
+never shared.
+Flow:
+ Host presses play
+ Emit SYNC_PLAY + timestamp
+ Server broadcasts to room
+ Guest receives event
+ Adjust for RTT
+ Guest plays at exact time
+Clock sync algorithm
+ On connect: measure RTT between client and server (3 pings, take median)
+ 
+ On SYNC_PLAY: guest seeks to event.videoTime + (RTT/2) then plays
+ 
+ Drift correction: every 10s, compare both users' currentTime via socket; if diff
+ >0.5s, silently nudge guest playback with small rate adjustments (1.05x or 0.95x)
+— never hard seek
+ On seek: emit SYNC_SEEK with target time; guest seeks to exact time + RTT/2
+ 
+ On pause: emit SYNC_PAUSE — both pause instantly, no offset needed
+ 
+ EMIT
+sync:play
+{"roomId", "videoTime", "serverTime"} — host only
+ EMIT
+sync:pause
+{"roomId", "videoTime"} — host only
+ EMIT
+sync:seek
+{"roomId", "videoTime"} — host only
+ EMIT
+sync:heartbeat
+{"roomId", "currentTime"} — every 10s, both users
+ ON
+sync:drift
+{"delta"} — server tells guest to adjust playback rate
+ ON
+peer:joined / peer:left
+triggers WebRTC offer/answer flow
+WEBRTC — VIDEO & VOICE
+
+Implementation with PeerJS
+ Use PeerJS — it wraps WebRTC and handles offer/answer/ICE automatically
+ 
+ On room join: get camera+mic via getUserMedia({video: true, audio: true})
+ 
+ Host creates a Peer, shares their PeerID via Socket.io to guest
+ 
+ Guest calls peer.call(hostPeerId, localStream)
+ 
+ Both users show their own video (muted, to avoid echo) and the other's video with
+ audio
+ STUN: use metered.ca free TURN/STUN credentials (handles NAT traversal —
+ works on all networks including hotspots and corporate WiFi)
+ Video tiles: small 200x150px floating PiP in corner of screen during movie
+ playback
+ Mute/unmute and video on/off controls always visible during watch
+ 
+MOVIE SOURCE & SEARCH
+Two modes for video input
+CineSync does NOT host or proxy video (legal reasons, bandwidth). It plays from a
+URL that both users have access to.
+ Mode 1 — Direct URL: Host pastes any direct video URL (mp4, m3u8 HLS
+ stream). Both users load the same URL in their own browser. Works with any
+public stream, personal Plex/Jellyfin, or public domain films.
+ Mode 2 — TMDB search UI: Search movies using the free TMDB API for
+ metadata (title, poster, description, year). TMDB does NOT provide streaming —
+it gives info only. Use this to pick what to watch, then user provides the streaming
+URL separately.
+ GET
+https://api.themoviedb.org/3/search/movie
+?api_key=KEY&query;=TITLE — returns title, poster, overview, release_date
+ GET
+https://api.themoviedb.org/3/movie/{id}
+Full movie details, runtime, genres
+API key: free at themoviedb.org — 1000 req/day. Store in .env as VITE_TMDB_KEY.
+BACKEND API (NODE + EXPRESS)
+ POST
+/api/room/create
+Creates a room, returns roomId (6-char code) and hostToken
+ POST
+/api/room/join
+{"roomId"} — validates room, returns guestToken and host's current videoUrl + videoTime
+
+GET
+/api/room/:roomId
+Room state: who's in it, what's playing, current timestamp
+ WS
+socket.io namespace: /room
+All sync events live here. Server is relay-only, stateless per event.
+SCREENS & UI
+1. Landing page
+· Create room button
+· Join with code input
+· No auth required
+2. Lobby
+· Share room code
+· Camera preview
+· Wait for partner
+· Paste video URL
+3. Watch room
+· Full-screen video player
+· 2x PiP video tiles
+· Mute/cam toggle
+· Sync status indicator
+4. Movie search
+· TMDB search bar
+· Poster grid results
+· Pick movie, add URL
+· Both see selection
+PERFORMANCE TARGETS
+Sync delay (play/pause/seek)
+<300ms
+Drift correction threshold
+0.5 seconds
+WebRTC call latency
+<150ms
+Room join time
+<2 seconds
+BUILD PRIORITY ORDER
+ 01
+Socket.io room + sync events (play/pause/seek)
+ Phase 1
+ 02
+Video.js player hooked to socket events
+ Phase 1
+ 03
+RTT measurement + seek offset on join
+ Phase 1
+ 04
+WebRTC video + audio via PeerJS
+ Phase 1
+ 05
+Room create/join UI (landing + lobby)
+ Phase 2
+ 06
+Heartbeat drift correction every 10s
+ Phase 2
+ 07
+TMDB movie search UI
+ Phase 2
+
+08
+Mute / cam toggle controls
+ Phase 2
+ 09
+Sync status badge (in sync / drifting)
+ Phase 3
+ 10
+Mobile responsive layout
+ Phase 3
+ENVIRONMENT VARIABLES
+VITE_TMDB_API_KEY=your_tmdb_key
+VITE_SOCKET_URL=http://localhost:3001
+VITE_PEERJS_HOST=0.peerjs.com
+VITE_PEERJS_PORT=443
+VITE_METERED_TURN_URL=your_metered_url
+VITE_METERED_TURN_USER=your_username
+VITE_METERED_TURN_CRED=your_credential
+PORT=3001
+OUT OF SCOPE (V1)
+Out of scope for v1
+ User accounts / auth (anonymous rooms only)
+ 
+ Video hosting or transcoding
+ 
+ More than 2 users per room
+ 
+ Text chat (easy Socket.io event, add in v2)
+ 
+ Screen sharing (separate WebRTC stream, v2)
+ 
+ Netflix/Prime integration (requires extensions, legal complexity)
+ 
+ CineSync PRD v1.0 — Generated for vibe coding
